@@ -1,5 +1,5 @@
-## Student Name:
-## Student ID:
+## Student Name: Mateo Pedraza
+## Student ID: 218659094
 
 """
 Task B: Event Registration with Waitlist (Stub)
@@ -63,8 +63,7 @@ class UserStatus:
 
 class EventRegistration:
     """
-    Students must implement this class per the lab handout.
-    Deterministic ordering is required (e.g., FIFO waitlist, predictable registration order).
+    Deterministic event registration system with FIFO waitlist.
     """
 
     def __init__(self, capacity: int) -> None:
@@ -72,8 +71,19 @@ class EventRegistration:
         Args:
             capacity: maximum number of registered users (>= 0)
         """
-        # TODO: Initialize internal data structures
-        raise NotImplementedError("EventRegistration.__init__ not implemented yet")
+        if not isinstance(capacity, int) or capacity < 0:
+            raise ValueError("capacity must be a non-negative integer")
+
+        self.capacity = capacity
+        self._registered: List[str] = []
+        self._waitlist: List[str] = []
+
+    def _validate_user_id(self, user_id: str) -> None:
+        if not isinstance(user_id, str) or user_id.strip() == "":
+            raise ValueError("user_id must be a non-empty string")
+
+    def _exists(self, user_id: str) -> bool:
+        return user_id in self._registered or user_id in self._waitlist
 
     def register(self, user_id: str) -> UserStatus:
         """
@@ -84,8 +94,17 @@ class EventRegistration:
         Raises:
             DuplicateRequest if user already exists (registered or waitlisted)
         """
-        # TODO: Implement per lab handout
-        raise NotImplementedError("register not implemented yet")
+        self._validate_user_id(user_id)
+
+        if self._exists(user_id):
+            raise DuplicateRequest(f"{user_id} is already in the system")
+
+        if len(self._registered) < self.capacity:
+            self._registered.append(user_id)
+            return UserStatus("registered")
+
+        self._waitlist.append(user_id)
+        return UserStatus("waitlisted", len(self._waitlist))
 
     def cancel(self, user_id: str) -> None:
         """
@@ -95,10 +114,23 @@ class EventRegistration:
           - behavior when user not found depends on handout (raise NotFound or ignore)
 
         Raises:
-            NotFound (if required by handout)
+            NotFound
         """
-        # TODO: Implement per lab handout
-        raise NotImplementedError("cancel not implemented yet")
+        self._validate_user_id(user_id)
+
+        if user_id in self._registered:
+            self._registered.remove(user_id)
+
+            if self.capacity > 0 and self._waitlist:
+                promoted = self._waitlist.pop(0)
+                self._registered.append(promoted)
+            return
+
+        if user_id in self._waitlist:
+            self._waitlist.remove(user_id)
+            return
+
+        raise NotFound(f"{user_id} not found")
 
     def status(self, user_id: str) -> UserStatus:
         """
@@ -107,13 +139,21 @@ class EventRegistration:
           - waitlisted with position (1-based)
           - none
         """
-        # TODO: Implement per lab handout
-        raise NotImplementedError("status not implemented yet")
+        self._validate_user_id(user_id)
+
+        if user_id in self._registered:
+            return UserStatus("registered")
+
+        if user_id in self._waitlist:
+            return UserStatus("waitlisted", self._waitlist.index(user_id) + 1)
+
+        return UserStatus("none")
 
     def snapshot(self) -> dict:
         """
-        (Optional helper for debugging/tests)
         Return a deterministic snapshot of internal state.
         """
-        # TODO: Implement if required/allowed
-        raise NotImplementedError("snapshot not implemented yet")
+        return {
+            "registered": self._registered.copy(),
+            "waitlist": self._waitlist.copy(),
+        }
