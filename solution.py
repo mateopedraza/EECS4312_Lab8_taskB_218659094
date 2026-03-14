@@ -61,6 +61,21 @@ class UserStatus:
     position: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class OperationResult:
+    """
+    Returned by register() and cancel().
+    operation_success: True if the operation completed as intended
+    status_message: human-readable description of the outcome
+    registered_users: ordered list of currently registered user IDs
+    waitlisted_users: ordered list of currently waitlisted user IDs (FIFO)
+    """
+    operation_success: bool
+    status_message: str
+    registered_users: List[str]
+    waitlisted_users: List[str]
+
+
 class EventRegistration:
     """
     Deterministic event registration system with FIFO waitlist.
@@ -85,36 +100,47 @@ class EventRegistration:
     def _exists(self, user_id: str) -> bool:
         return user_id in self._registered or user_id in self._waitlist
 
-    def register(self, user_id: str) -> UserStatus:
+    def _result(self, operation_success: bool, status_message: str) -> OperationResult:
+        return OperationResult(
+            operation_success=operation_success,
+            status_message=status_message,
+            registered_users=self._registered.copy(),
+            waitlisted_users=self._waitlist.copy(),
+        )
+
+    def register(self, user_id: str) -> OperationResult:
         """
         Register a user:
           - if capacity available -> registered
           - else -> waitlisted (FIFO)
 
-        Raises:
-            DuplicateRequest if user already exists (registered or waitlisted)
+        Returns OperationResult with operation_success = False for duplicates
+        instead of raising. Covers both registered and waitlisted duplicates.
+        Constraints: C1, C3, C4, C9, C10, C11
         """
         self._validate_user_id(user_id)
 
         if self._exists(user_id):
-            raise DuplicateRequest(f"{user_id} is already in the system")
+            return self._result(False, f"{user_id} is already in the system")
 
         if len(self._registered) < self.capacity:
             self._registered.append(user_id)
-            return UserStatus("registered")
+            return self._result(True, f"{user_id} registered successfully")
 
         self._waitlist.append(user_id)
-        return UserStatus("waitlisted", len(self._waitlist))
+        return self._result(True, f"{user_id} added to waitlist")
 
-    def cancel(self, user_id: str) -> None:
+    def cancel(self, user_id: str) -> OperationResult:
         """
         Cancel a user:
           - if registered -> remove and promote earliest waitlisted user (if any)
-          - if waitlisted -> remove from waitlist
-          - behavior when user not found depends on handout (raise NotFound or ignore)
+          - if waitlisted -> remove from waitlist, no promotion
+          - if not found -> operation_success = False
 
-        Raises:
-            NotFound
+        Promotion message names both the cancelled and promoted user (C6).
+        No-promotion message omits promotion text (C6).
+        Returns OperationResult in all cases instead of raising (C7).
+        Constraints: C1, C5, C6, C7, C11
         """
         self._validate_user_id(user_id)
 
@@ -124,20 +150,26 @@ class EventRegistration:
             if self.capacity > 0 and self._waitlist:
                 promoted = self._waitlist.pop(0)
                 self._registered.append(promoted)
-            return
+                return self._result(
+                    True,
+                    f"{user_id} cancelled; {promoted} promoted from waitlist",
+                )
+
+            return self._result(True, f"{user_id} cancelled successfully")
 
         if user_id in self._waitlist:
             self._waitlist.remove(user_id)
-            return
+            return self._result(True, f"{user_id} cancelled successfully")
 
-        raise NotFound(f"{user_id} not found")
+        return self._result(False, f"{user_id} not found")
 
     def status(self, user_id: str) -> UserStatus:
         """
         Return status of a user:
-          - registered
-          - waitlisted with position (1-based)
-          - none
+          - registered -> state = "registered", position = None
+          - waitlisted -> state = "waitlisted", position = 1-based index
+          - unknown   -> state = "none", position = None
+        Constraints: C12
         """
         self._validate_user_id(user_id)
 

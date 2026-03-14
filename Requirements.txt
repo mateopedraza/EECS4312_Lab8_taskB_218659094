@@ -1,0 +1,391 @@
+## Student Name: Mateo Pedraza
+## Student ID: 218659094
+## Lab 9 - Task 5: Updated System Requirements
+
+================================================================================
+## 1. Problem Understanding
+================================================================================
+
+System purpose:
+Manages event enrollment for a single event with a fixed capacity. Users are
+registered until capacity is reached, then placed in a FIFO waitlist. When a
+registered user cancels, the first waitlisted user is automatically promoted.
+The system must never silently fail and must return a structured result for
+every operation.
+
+Inputs to the system:
+- capacity: non-negative integer, set once at initialization
+- user_id: non-empty string identifying a user
+- operation: one of register(user_id), cancel(user_id), status(user_id), snapshot()
+
+Outputs produced by the system:
+- OperationResult: returned by register() and cancel(), contains:
+    operation_success (bool), status_message (str),
+    registered_users (List[str]), waitlisted_users (List[str])
+- UserStatus: returned by status(), contains:
+    state (str: "registered" / "waitlisted" / "none"),
+    position (Optional[int]: 1-based waitlist position, None otherwise)
+- snapshot(): returns dict with "registered" and "waitlist" keys
+
+Primary goal of the system:
+Enforce capacity rules automatically, promote waitlisted users on cancellation
+without manual input, and communicate every state change clearly so both
+automated and careful users can trust the system.
+
+================================================================================
+## 2. Assumptions
+================================================================================
+
+A1: Capacity is set once at initialization and never changes.
+A2: user_id values are unique and provided by the caller. The system enforces
+    uniqueness but does not generate IDs.
+A3: Operations are sequential. Simultaneous calls are resolved by call-stack
+    order. Each call completes as one state transition with no partial updates.
+A4: State is in-memory only. No disk persistence is required.
+A5: Only the Python standard library is used.
+A6: A cancelled user is fully removed. If they re-register, they are treated as
+    a new entry with no memory of their previous position.
+A7: Malformed inputs (empty user_id, negative capacity, non-integer capacity)
+    raise ValueError before any state change occurs.
+
+================================================================================
+## 3. Functional Requirements
+================================================================================
+
+FR1: Capacity Initialization
+The system must accept a non-negative integer capacity at startup. If capacity
+is 0, all registering users go directly to the waitlist.
+Derived from: C1, C5, C8
+
+FR2: Automatic Promotion on Cancellation
+When a registered user cancels and the waitlist is non-empty, the system must
+automatically promote the user at index 0 of the waitlist within the same
+cancel() call. The status_message must name both the cancelled user and the
+promoted user.
+Derived from: C1, C6
+
+FR3: Structured Operation Result
+Every call to register() and cancel() must return exactly one OperationResult
+with the following required fields: operation_success (bool), status_message
+(str), registered_users (List[str]), waitlisted_users (List[str]).
+Derived from: C3, C7, C8, C11
+
+FR4: Explicit Failure Response
+Duplicate registrations (whether the user is registered or waitlisted) and
+cancellations of unknown users must return an OperationResult with
+operation_success = False and a descriptive status_message. The system must
+not raise unhandled exceptions for these cases.
+Derived from: C7
+
+FR5: FIFO Ordering and Re-indexing
+The waitlist must maintain strict FIFO insertion order. New users are appended
+to the end. When any user cancels from the waitlist, remaining users re-index
+so positions stay contiguous. Promotions always remove index 0.
+Derived from: C2, C5
+
+FR6: Status Query with Position
+status() must return a UserStatus with state and, if waitlisted, a 1-based
+position. For unknown users, state is "none" and position is None. The response
+structure must be the same regardless of the user's state.
+Derived from: C8, C12
+
+FR7: Boundary Response Consistency
+Boundary inputs (capacity = 0, cancel on unknown user, status on unknown user)
+must always return the same response structure and message template on repeated
+calls, with only user-specific values changing.
+Derived from: C7, C8
+
+FR8: Cancel from Waitlist
+A user on the waitlist may cancel. The system removes them, re-indexes remaining
+waitlisted users, and returns an OperationResult with operation_success = True.
+No promotion occurs since no registered slot was freed.
+Derived from: C5, C7
+
+FR9: Re-registration after Cancellation
+A user who has previously cancelled may call register() again. They are treated
+as a brand-new entry with no restored position. They are appended to the
+registered list or end of the waitlist based on current capacity.
+Derived from: C2, C5
+
+================================================================================
+## 4. System Constraints
+================================================================================
+
+C1: When a registered user cancels and the waitlist is non-empty, the system must
+automatically promote waitlist index 0 within the same call. No caller input needed.
+Derived from persona attribute: Jane - "Trusts the system to resolve conflicts
+and enforce rules automatically." (Behavior)
+
+C2: The registered list must be ordered by insertion time and must not reorder
+except as a direct result of a cancel or promotion.
+Derived from persona attribute: Jane - "Predictable and stable ordering of
+system decisions." (Need)
+
+C3: Each call to register(), cancel(), or status() must return exactly one
+response object. The system must never emit more than one response per call.
+Derived from persona attribute: Jane - "Receiving too many notifications or
+duplicate system messages." (Pain Point)
+
+C4: When a user registers and capacity is full, the system must automatically
+place them at the end of the waitlist and return one concise OperationResult
+explicitly confirming the waitlist placement. No secondary messages are emitted.
+Derived from persona attribute: Jane - "Limited notification or information
+overload." (Need)
+
+C5: The promoted user must always be the one at waitlist index 0. The same
+operation sequence must always produce the same outcome.
+Derived from persona attribute: Mo - "Deterministic system behavior under ties
+or conflicting conditions." (Need)
+
+C6: The status_message from a cancel() that triggers a promotion must contain
+both the cancelled user's ID and the promoted user's ID. A cancel() with no
+promotion must confirm only the cancellation with no promotion text.
+Derived from persona attribute: Mo - "Clear explanations when waitlist
+promotions occur." (Need)
+
+C7: Any invalid operation must return operation_success = False with a non-empty
+status_message. The system must never silently ignore an invalid request.
+Derived from persona attribute: Mo - "Silent failures or dropped requests."
+(Pain Point)
+
+C8: Boundary inputs must always return a response with the same fields and the
+same message template across repeated calls, with only user-specific values
+changing between calls.
+Derived from persona attribute: Mo - "Inconsistent responses across repeated
+or boundary scenarios." (Pain Point)
+
+C9: A user_id may appear at most once across both the registered list and the
+waitlist combined. Duplicate registration is invalid whether the user is
+currently registered or waitlisted.
+Derived from persona attribute: Mo - "Deterministic system behavior." (Need)
+[Added: Revision Note 2]
+
+C10: operation_success = True means the user was accepted into the system
+(either registered or waitlisted). Waitlist placement is a successful operation.
+Derived from persona attribute: Jane - "Trusts the system to resolve conflicts
+automatically." (Behavior)
+[Added: Revision Note 3]
+
+C11: Every OperationResult must contain exactly these fields: operation_success
+(bool), status_message (str), registered_users (List[str]),
+waitlisted_users (List[str]). No implementation may omit or rename these fields.
+Derived from persona attribute: Mo - "Inconsistent responses across repeated
+or boundary scenarios." (Pain Point)
+[Added: Revision Note 5]
+
+C12: status() must return a defined result for all user states. For a registered
+user: state = "registered". For a waitlisted user: state = "waitlisted" and
+position = 1-based index. For an unknown user: state = "none", position = None.
+Derived from persona attribute: Mo - "Clear explanations when waitlist
+promotions occur." (Need)
+[Added: Revision Note 6]
+
+================================================================================
+## 5. Acceptance Criteria
+================================================================================
+
+AC1:
+Given a system with capacity 3 and 2 registered users, when a new user registers,
+then operation_success is True, the user is in registered_users, and exactly one
+OperationResult is returned.
+Linked Constraint(s): C1, C2, C3
+
+AC2:
+Given a full system with waitlist [W1, W2], when the first registered user cancels,
+then W1 moves to registered_users, W2 is at index 0 of waitlisted_users, and
+status_message names both the cancelled user and W1.
+Linked Constraint(s): C1, C5, C6
+
+AC3:
+Given a full system, when a new user registers, then they are appended to the end
+of waitlisted_users, registered_users is unchanged, operation_success is True, and
+one OperationResult is returned.
+Linked Constraint(s): C4, C5, C10
+
+AC4:
+Given a user already in registered_users, when they try to register again, then
+operation_success is False, status_message is non-empty, and system state is unchanged.
+Linked Constraint(s): C7, C9
+
+AC5:
+Given a user_id not in the system, when cancel() is called, then operation_success
+is False, status_message is non-empty, and system state is unchanged.
+Linked Constraint(s): C7, C8
+
+AC6:
+Given capacity = 0, when three users register in sequence, then all three have
+operation_success = True, all three are in waitlisted_users in registration order,
+and registered_users is empty.
+Linked Constraint(s): C4, C8, C10
+
+AC7:
+Given waitlist [W1, W2, W3], when a registered user cancels and the scenario is
+replayed 3 times from fresh state, then W1 is always promoted and the outcome is
+identical each time.
+Linked Constraint(s): C5
+
+AC8:
+Given a cancel() that triggers a promotion, when the OperationResult is inspected,
+then status_message contains both the cancelled user's ID and the promoted user's ID.
+Linked Constraint(s): C6
+
+AC9:
+Given a user already on the waitlist, when they try to register again, then
+operation_success is False, status_message is non-empty, and system state is unchanged.
+Linked Constraint(s): C7, C9
+
+AC10:
+Given waitlist [W1, W2], when cancel(W1) is called, then operation_success is True,
+W1 is removed, W2 is at waitlisted_users index 0, registered_users is unchanged,
+and status_message contains no promotion text.
+Linked Constraint(s): C5, C6, FR8
+
+AC11:
+Given a user who previously cancelled, when they register again, then they are
+treated as a new entry and appended to registered_users or the end of
+waitlisted_users based on current capacity. Previous position is not restored.
+Linked Constraint(s): C2, C5, FR9
+
+AC12:
+Given a registered user and an empty waitlist, when cancel() is called, then
+operation_success is True, the user is removed from registered_users,
+waitlisted_users remains empty, and status_message contains no promotion text.
+Linked Constraint(s): C1, C6
+
+AC13:
+Given a registered user, when status(user_id) is called, then state is
+"registered" and position is None.
+Linked Constraint(s): C12
+
+AC14:
+Given a user at waitlist position 2, when status(user_id) is called, then state
+is "waitlisted" and position is 2.
+Linked Constraint(s): C12
+
+AC15:
+Given an unknown user_id, when status(user_id) is called three times from the
+same system state, then each result has state = "none", position = None, and
+the same status_message template.
+Linked Constraint(s): C8, C12
+
+================================================================================
+## 6. Edge Cases
+================================================================================
+
+EC1: Capacity = 0
+Every registering user goes directly to the waitlist. The registered list stays empty.
+Expected system behavior: register() returns operation_success = True with the user
+in waitlisted_users. Response structure is identical for every call.
+Linked Constraint(s): C4, C8, C10
+Covered by: AC6
+
+EC2: Cancel with empty waitlist
+A registered user cancels when no one is on the waitlist.
+Expected system behavior: cancel() returns operation_success = True, user is
+removed, status_message confirms cancellation only with no promotion text.
+Linked Constraint(s): C1, C6
+Covered by: AC12
+
+EC3: Cancel on non-existent user
+cancel() is called for a user_id not in either list.
+Expected system behavior: operation_success = False, non-empty status_message
+describing the failure, system state unchanged.
+Linked Constraint(s): C7, C8
+Covered by: AC5
+
+EC4: Duplicate registration from waitlist
+A user already on the waitlist calls register() again.
+Expected system behavior: operation_success = False, status_message identifies
+the conflict, system state unchanged.
+Linked Constraint(s): C7, C9
+Covered by: AC9
+
+EC5: Waitlisted user cancels mid-queue
+A user at position 3 cancels. Remaining users must re-index.
+Expected system behavior: user is removed, all users behind shift forward by one,
+snapshot() reflects updated order, no promotion occurs.
+Linked Constraint(s): C5, C7, FR8
+Covered by: AC10
+
+EC6: Re-registration after cancellation
+A previously cancelled user calls register() again.
+Expected system behavior: treated as a brand-new entry, appended to registered_users
+or end of waitlisted_users based on current capacity. Previous position not restored.
+Linked Constraint(s): C2, C5, FR9
+Covered by: AC11
+
+================================================================================
+## 7. Traceability
+================================================================================
+
+FR1 -> C1, C5, C8 -> AC6, AC7
+FR2 -> C1, C6 -> AC2, AC8, AC12
+FR3 -> C3, C7, C8, C11 -> AC1, AC3, AC5, AC6
+FR4 -> C7, C9 -> AC4, AC5, AC9
+FR5 -> C2, C5 -> AC3, AC7, AC10
+FR6 -> C8, C12 -> AC13, AC14, AC15
+FR7 -> C7, C8 -> AC5, AC6, AC15
+FR8 -> C5, C7 -> AC10, EC5
+FR9 -> C2, C5 -> AC11, EC6
+
+================================================================================
+## Revision Notes
+================================================================================
+
+Revision Note 1
+Requirement updated: C4 - wording changed from "silently redirects" to
+"automatically place the user at the end of the waitlist and return one concise
+OperationResult explicitly confirming the waitlist placement."
+Reason: LLM flagged a contradiction between "silently redirects" and Mo's need
+for explicit explanations on every state change. The word "silent" was doing two
+different jobs and invited conflicting implementations.
+Triggered by: LLM feedback, Prompt 1 (Issue X1/X2), confirmed in Prompt 2 (Issue 11)
+Affected requirements: C4, FR3, AC3, AC6
+
+Revision Note 2
+Requirement added: C9 - uniqueness constraint across both lists.
+Reason: LLM flagged that AC4 only covered duplicate-while-registered. A user
+already on the waitlist could register again without violating any stated rule.
+Triggered by: LLM feedback, Prompt 1 (Issue M3), confirmed in Prompt 2 (Issue 3)
+Affected requirements: C9 (new), FR4, AC4, AC9 (new)
+
+Revision Note 3
+Requirement added: C10 - explicit definition of operation_success semantics.
+Reason: AC3 and AC6 treat waitlist placement as success = True but this was never
+stated as a rule. Different implementations could return False for waitlist
+placement and still satisfy the original spec.
+Triggered by: LLM feedback, Prompt 1 (Issue A3), confirmed in Prompt 2 (Issue 13)
+Affected requirements: C10 (new), AC3, AC6
+
+Revision Note 4
+Requirements added: FR8, FR9, AC10, AC11, AC12.
+Reason: Cancel-from-waitlist and re-registration after cancellation were implied
+or dropped from the Lab 8 spec. Both are valid behaviors that needed formal rules.
+Triggered by: LLM feedback, Prompt 1 (Issues M4, M10)
+Affected requirements: FR8 (new), FR9 (new), AC10 (new), AC11 (new), AC12 (new)
+
+Revision Note 5
+Requirement added: C11 - explicit OperationResult field names.
+Reason: LLM flagged that "return one structured result" does not pin down which
+fields are required. Two implementations could satisfy the spec while returning
+different field names, making tests non-portable.
+Triggered by: LLM feedback, Prompt 2 (Issue 1)
+Affected requirements: C11 (new), FR3, all ACs referencing OperationResult
+
+Revision Note 6
+Requirement added: C12 - status() behavior for all user states.
+Reason: LLM flagged that status() was only defined for unknown users (C8). No
+constraint described what to return for registered or waitlisted users, making
+AC13/AC14 untestable without a definition.
+Triggered by: LLM feedback, Prompt 2 (Issues 6, 17)
+Affected requirements: C12 (new), FR6, AC13 (new), AC14 (new), AC15 (new)
+
+Revision Note 7
+Requirement updated: C8 - "message pattern" tightened to "same fields and the
+same message template, with only user-specific values changing between calls."
+Reason: "Message pattern" was too vague to be testable. A team could claim
+compliance while returning completely different message structures.
+Triggered by: LLM feedback, Prompt 2 (Issue 12)
+Affected requirements: C8, FR7
+
+================================================================================
